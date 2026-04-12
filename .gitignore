@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env
+
+# Data files (large CSVs — not committed, provide your own)
+data/ovrednoteni/*.csv
+data/vsi_podatki/*.csv
+data/uploads/
+
+# Raw source data folder
+podatki/
+
+# Python cache
+backend/__pycache__/
+backend/core/__pycache__/
+backend/models/__pycache__/
+backend/tests/__pycache__/
+
+# Model artifact — committed intentionally (2.9 MB, saves other devs from needing training data)
+# To regenerate: cd backend && python models/train.py (requires data/ovrednoteni/ CSVs)
+# !backend/models/isolation_forest.pkl
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
