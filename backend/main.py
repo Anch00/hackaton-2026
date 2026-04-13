@@ -21,6 +21,7 @@ from core.parser import load_all_meters, parse_csv, get_meter_filepath
 from core.detector import detect_anomalies, _load_model
 from core.classifier import extract_blocks, AnomalyBlock
 from core.metrics import calculate_metrics
+from core.analytics import EventReconstructor, GeographicAnalyzer, PredictiveAnalyzer, InfrastructureOptimizer
 
 
 # ─── App setup ───────────────────────────────────────────────────────────────
@@ -383,3 +384,162 @@ def export_json(folder: str = Query(default="vsi_podatki")):
         media_type="application/json",
         headers={"Content-Disposition": "attachment; filename=gridsense_result.json"},
     )
+
+
+# ── ADVANCED ANALYTICS (Phase 3 & 4 Integration) ────────────────────────────
+
+@app.get("/api/analytics/events")
+def get_reconstructed_events(folder: str = Query(default="vsi_podatki")):
+    """Reconstruct network-wide events from individual meter outages (Phase 3)."""
+    folder_path = _resolve_folder(folder)
+    meters_dict = load_all_meters(folder_path)
+    events = EventReconstructor.reconstruct_events(meters_dict)
+    return {
+        "total_events": len(events),
+        "top_events": events[:20],  # Top 20 by impact
+        "critical_events": [e for e in events if e['severity'] == 'CRITICAL'][:10]
+    }
+
+
+@app.get("/api/analytics/clustering")
+def get_geographic_clusters(folder: str = Query(default="vsi_podatki")):
+    """Analyze geographic meter clusters (Phase 3)."""
+    folder_path = _resolve_folder(folder)
+    meters_dict = load_all_meters(folder_path)
+    clusters = GeographicAnalyzer.find_correlated_meters(meters_dict)
+    
+    cluster_details = {}
+    for cluster_id, meter_ids in clusters.items():
+        health = GeographicAnalyzer.calculate_cluster_health(meter_ids, meters_dict)
+        cluster_details[cluster_id] = {
+            "meter_ids": meter_ids,
+            **health
+        }
+    
+    # Sort by priority
+    sorted_clusters = sorted(
+        cluster_details.items(),
+        key=lambda x: (x[1]['priority'] == 'CRITICAL', -x[1]['outage_events'])
+    )
+    
+    return {
+        "total_clusters": len(clusters),
+        "critical_clusters": sum(1 for c in cluster_details.values() if c['priority'] == 'CRITICAL'),
+        "high_priority_clusters": sum(1 for c in cluster_details.values() if c['priority'] in ['CRITICAL', 'HIGH']),
+        "top_clusters": [
+            {
+                "cluster_id": c[0],
+                "meters": c[1]["meter_ids"],
+                **{k: v for k, v in c[1].items() if k != "meter_ids"}
+            }
+            for c in sorted_clusters[:15]
+        ]
+    }
+
+
+@app.get("/api/analytics/predictive/hourly-risk")
+def get_hourly_risk_model(folder: str = Query(default="vsi_podatki")):
+    """Predictive model: outage risk by hour-of-day (Phase 4)."""
+    folder_path = _resolve_folder(folder)
+    meters_dict = load_all_meters(folder_path)
+    risk_model = PredictiveAnalyzer.build_hourly_risk_model(meters_dict)
+    
+    # Convert dict to list for JSON serialization
+    hours_data = [
+        {
+            "hour": hour,
+            **risk_model[hour]
+        }
+        for hour in range(24)
+    ]
+    
+    # Find peak risk hours
+    critical_hours = [h for h in hours_data if h['risk_level'] == 'CRITICAL']
+    high_hours = [h for h in hours_data if h['risk_level'] == 'HIGH']
+    
+    return {
+        "hourly_breakdown": hours_data,
+        "peak_risk_hours": [h['hour'] for h in sorted(critical_hours, key=lambda x: x['risk_score'], reverse=True)],
+        "critical_hours_count": len(critical_hours),
+        "high_risk_hours_count": len(high_hours)
+    }
+
+
+@app.get("/api/analytics/predictive/mttr")
+def get_mttr_analysis(folder: str = Query(default="vsi_podatki")):
+    """Mean Time To Restore analysis by hour (Phase 4)."""
+    folder_path = _resolve_folder(folder)
+    meters_dict = load_all_meters(folder_path)
+    mttr_data = PredictiveAnalyzer.calculate_mttr(meters_dict)
+    
+    # Convert to list for JSON
+    hours_data = [
+        {
+            "hour": hour,
+            **mttr_data[hour]
+        }
+        for hour in range(24)
+    ]
+    
+    # Find worst hours
+    worst_hours = sorted(hours_data, key=lambda x: x['mttr_hours'], reverse=True)[:5]
+    
+    return {
+        "mttr_by_hour": hours_data,
+        "worst_hours": worst_hours,
+        "average_mttr": round(sum(h['mttr_hours'] for h in hours_data) / 24, 2)
+    }
+
+
+@app.get("/api/analytics/infrastructure-roadmap")
+def get_infrastructure_roadmap(folder: str = Query(default="vsi_podatki")):
+    """3-phase infrastructure upgrade roadmap (Phase 4)."""
+    folder_path = _resolve_folder(folder)
+    meters_dict = load_all_meters(folder_path)
+    clusters = GeographicAnalyzer.find_correlated_meters(meters_dict)
+    
+    roadmap = InfrastructureOptimizer.generate_upgrade_roadmap(clusters, meters_dict)
+    return roadmap
+
+
+@app.get("/api/analytics/summary")
+def get_analytics_summary(folder: str = Query(default="vsi_podatki")):
+    """Complete analytics summary (all phases)."""
+    folder_path = _resolve_folder(folder)
+    meters_dict = load_all_meters(folder_path)
+    
+    # Reconstruct events
+    events = EventReconstructor.reconstruct_events(meters_dict)
+    critical_events = [e for e in events if e['severity'] == 'CRITICAL']
+    
+    # Geographic analysis
+    clusters = GeographicAnalyzer.find_correlated_meters(meters_dict)
+    critical_clusters = sum(1 for cluster_id, meter_ids in clusters.items()
+                          if GeographicAnalyzer.calculate_cluster_health(meter_ids, meters_dict)['priority'] == 'CRITICAL')
+    
+    # Predictive analysis
+    risk_model = PredictiveAnalyzer.build_hourly_risk_model(meters_dict)
+    peak_hours = [h for h in range(24) if risk_model[h]['risk_level'] == 'CRITICAL']
+    
+    return {
+        "event_reconstruction": {
+            "total_events": len(events),
+            "critical_events": len(critical_events),
+            "event_distribution": "Phase 3 - Reconstructed events from simultaneous meter outages"
+        },
+        "geographic_analysis": {
+            "total_clusters": len(clusters),
+            "critical_clusters": critical_clusters,
+            "analysis": "Phase 3 - Meter clustering and correlated failures"
+        },
+        "predictive_modeling": {
+            "peak_risk_hours": peak_hours,
+            "critical_hours": len([h for h in range(24) if risk_model[h]['risk_level'] == 'CRITICAL']),
+            "analysis": "Phase 4 - Hourly outage risk and MTTR"
+        },
+        "infrastructure": {
+            "roadmap_status": "Available via /api/analytics/infrastructure-roadmap",
+            "analysis": "Phase 4 - 3-phase upgrade strategy"
+        }
+    }
+

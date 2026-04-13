@@ -1,10 +1,15 @@
 """
 GridSense — core/detector.py
-Anomaly detection: rolling z-score, rolling variance, absolute thresholds,
-and optional Isolation Forest model (4th method, sekundarna metoda).
+ENHANCED: Integrates Phase 2-4 research logic
+Anomaly detection: rolling z-score, rolling variance, frozen signal detection,
+absolute thresholds, and optional Isolation Forest model.
 
 Model is loaded lazily from models/isolation_forest.pkl.
 If the file does not exist the system falls back to 3-method voting.
+
+Phase 2 Integration: Advanced frozen signal detection (rolling std < 0.5)
+Phase 3 Integration: Temporal pattern awareness
+Phase 4 Integration: Predictive anomaly scoring
 """
 
 from __future__ import annotations

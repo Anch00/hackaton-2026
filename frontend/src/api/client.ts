@@ -72,3 +72,35 @@ export function exportCsvUrl(folder: FolderKey = 'vsi_podatki') {
 export function exportJsonUrl(folder: FolderKey = 'vsi_podatki') {
   return `/api/export/json?folder=${folder}`
 }
+
+// ── Advanced Analytics (Phase 3 & 4) ──────────────────────────────────────
+
+export async function getAnalytics(folder: FolderKey = 'vsi_podatki'): Promise<any> {
+  const { data } = await api.get(`/analytics/summary`, { params: { folder } })
+  return data
+}
+
+export async function getReconstructedEvents(folder: FolderKey = 'vsi_podatki'): Promise<any> {
+  const { data } = await api.get(`/analytics/events`, { params: { folder } })
+  return data
+}
+
+export async function getGeographicClusters(folder: FolderKey = 'vsi_podatki'): Promise<any> {
+  const { data } = await api.get(`/analytics/clustering`, { params: { folder } })
+  return data
+}
+
+export async function getHourlyRisk(folder: FolderKey = 'vsi_podatki'): Promise<any> {
+  const { data } = await api.get(`/analytics/predictive/hourly-risk`, { params: { folder } })
+  return data
+}
+
+export async function getMTTR(folder: FolderKey = 'vsi_podatki'): Promise<any> {
+  const { data } = await api.get(`/analytics/predictive/mttr`, { params: { folder } })
+  return data
+}
+
+export async function getInfrastructureRoadmap(folder: FolderKey = 'vsi_podatki'): Promise<any> {
+  const { data } = await api.get(`/analytics/infrastructure-roadmap`, { params: { folder } })
+  return data
+}
