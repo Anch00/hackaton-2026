@@ -1,15 +1,35 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getEvents } from '../api/client'
 import EventTable from '../components/EventTable'
+import { useAnalysis } from '../context/AnalysisContext'
 import type { Event, FolderKey } from '../types'
 
 export default function Events() {
-  const [folder, setFolder] = useState<FolderKey>('vsi_podatki')
+  const { currentFolder, setCurrentFolder, getPreloadedEvents } = useAnalysis()
+
+  const [folder, setFolderState] = useState<FolderKey>(currentFolder)
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Sync folder with context
+  useEffect(() => {
+    setFolderState(currentFolder)
+  }, [currentFolder])
+
+  const setFolder = useCallback((newFolder: FolderKey) => {
+    setFolderState(newFolder)
+    setCurrentFolder(newFolder)
+  }, [setCurrentFolder])
+
   const load = useCallback(async () => {
+    // First check if we have preloaded data
+    const preloaded = getPreloadedEvents(folder)
+    if (preloaded) {
+      setEvents(preloaded)
+      return
+    }
+
     setLoading(true)
     setError(null)
     try {
@@ -20,7 +40,7 @@ export default function Events() {
     } finally {
       setLoading(false)
     }
-  }, [folder])
+  }, [folder, getPreloadedEvents])
 
   useEffect(() => { load() }, [load])
 

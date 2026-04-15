@@ -1,5 +1,6 @@
 import React from 'react'
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { AnalysisProvider } from './context/AnalysisContext'
 import Analysis from './pages/Analysis'
 import AnalyticsAdv from './pages/AnalyticsAdv'
 import Dashboard from './pages/Dashboard'
@@ -54,18 +55,20 @@ function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/meters" element={<Meters />} />
-          <Route path="/meters/:id" element={<MeterDetail />} />
-          <Route path="/events" element={<Events />} />
-          <Route path="/analysis" element={<Analysis />} />
-          <Route path="/analytics-adv" element={<AnalyticsAdv />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Layout>
-    </BrowserRouter>
+    <AnalysisProvider>
+      <BrowserRouter>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/meters" element={<Meters />} />
+            <Route path="/meters/:id" element={<MeterDetail />} />
+            <Route path="/events" element={<Events />} />
+            <Route path="/analysis" element={<Analysis />} />
+            <Route path="/analytics-adv" element={<AnalyticsAdv />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Layout>
+      </BrowserRouter>
+    </AnalysisProvider>
   )
 }

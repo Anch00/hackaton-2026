@@ -1,25 +1,45 @@
-import { useCallback, useState, useEffect } from 'react'
-import { getAnalytics, getHourlyRisk, getMTTR, getInfrastructureRoadmap } from '../api/client'
+import { useCallback, useEffect, useState } from 'react'
+import { getGeographicClusters, getHourlyRisk, getInfrastructureRoadmap, getReconstructedEvents } from '../api/client'
+import { useAnalysis } from '../context/AnalysisContext'
 import type { FolderKey } from '../types'
 
 export default function AnalyticsAdv() {
-  const [folder, setFolder] = useState<FolderKey>('vsi_podatki')
+  const { currentFolder, setCurrentFolder, getPreloadedAnalytics } = useAnalysis()
+
+  const [folder, setFolderState] = useState<FolderKey>(currentFolder)
   const [activeTab, setActiveTab] = useState<'events' | 'clustering' | 'risk' | 'roadmap'>('events')
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<any>(null)
 
+  // Sync folder with context
+  useEffect(() => {
+    setFolderState(currentFolder)
+  }, [currentFolder])
+
+  const setFolder = useCallback((newFolder: FolderKey) => {
+    setFolderState(newFolder)
+    setCurrentFolder(newFolder)
+  }, [setCurrentFolder])
+
   const loadData = useCallback(async () => {
+    // First check if we have preloaded data
+    const preloaded = getPreloadedAnalytics(folder, activeTab)
+    if (preloaded) {
+      setData(preloaded)
+      return
+    }
+
     setLoading(true)
     try {
       let result = null
       if (activeTab === 'events') {
-        result = await fetch(`http://localhost:8000/api/analytics/events?folder=${folder}`).then(r => r.json())
+        result = await getReconstructedEvents(folder)
       } else if (activeTab === 'clustering') {
-        result = await fetch(`http://localhost:8000/api/analytics/clustering?folder=${folder}`).then(r => r.json())
+        result = await getGeographicClusters(folder)
       } else if (activeTab === 'risk') {
-        result = await fetch(`http://localhost:8000/api/analytics/predictive/hourly-risk?folder=${folder}`).then(r => r.json())
+        result = await getHourlyRisk(folder)
       } else if (activeTab === 'roadmap') {
-        result = await fetch(`http://localhost:8000/api/analytics/infrastructure-roadmap?folder=${folder}`).then(r => r.json())
+        result = await getInfrastructureRoadmap(folder)
       }
       setData(result)
     } catch (e) {
@@ -27,7 +47,7 @@ export default function AnalyticsAdv() {
     } finally {
       setLoading(false)
     }
-  }, [folder, activeTab])
+  }, [folder, activeTab, getPreloadedAnalytics])
 
   useEffect(() => {
     loadData()
@@ -45,41 +65,37 @@ export default function AnalyticsAdv() {
       <div className="flex gap-2 border-b border-gray-700">
         <button
           onClick={() => setActiveTab('events')}
-          className={`px-4 py-2 font-medium transition ${
-            activeTab === 'events'
-              ? 'border-b-2 border-blue-500 text-blue-400'
-              : 'text-gray-400 hover:text-gray-300'
-          }`}
+          className={`px-4 py-2 font-medium transition ${activeTab === 'events'
+            ? 'border-b-2 border-blue-500 text-blue-400'
+            : 'text-gray-400 hover:text-gray-300'
+            }`}
         >
           🔄 Event Reconstruction
         </button>
         <button
           onClick={() => setActiveTab('clustering')}
-          className={`px-4 py-2 font-medium transition ${
-            activeTab === 'clustering'
-              ? 'border-b-2 border-blue-500 text-blue-400'
-              : 'text-gray-400 hover:text-gray-300'
-          }`}
+          className={`px-4 py-2 font-medium transition ${activeTab === 'clustering'
+            ? 'border-b-2 border-blue-500 text-blue-400'
+            : 'text-gray-400 hover:text-gray-300'
+            }`}
         >
           🗺️ Geographic Clustering
         </button>
         <button
           onClick={() => setActiveTab('risk')}
-          className={`px-4 py-2 font-medium transition ${
-            activeTab === 'risk'
-              ? 'border-b-2 border-blue-500 text-blue-400'
-              : 'text-gray-400 hover:text-gray-300'
-          }`}
+          className={`px-4 py-2 font-medium transition ${activeTab === 'risk'
+            ? 'border-b-2 border-blue-500 text-blue-400'
+            : 'text-gray-400 hover:text-gray-300'
+            }`}
         >
           🔮 Hourly Risk Model
         </button>
         <button
           onClick={() => setActiveTab('roadmap')}
-          className={`px-4 py-2 font-medium transition ${
-            activeTab === 'roadmap'
-              ? 'border-b-2 border-blue-500 text-blue-400'
-              : 'text-gray-400 hover:text-gray-300'
-          }`}
+          className={`px-4 py-2 font-medium transition ${activeTab === 'roadmap'
+            ? 'border-b-2 border-blue-500 text-blue-400'
+            : 'text-gray-400 hover:text-gray-300'
+            }`}
         >
           🏗️ Infrastructure Roadmap
         </button>
@@ -138,9 +154,9 @@ function EventsTab({ data }: { data: any }) {
           <p className="text-3xl font-bold text-yellow-400">
             {data.top_events?.length > 0
               ? (
-                  data.top_events.reduce((sum: number, e: any) => sum + e.affected_count, 0) /
-                  data.top_events.length
-                ).toFixed(1)
+                data.top_events.reduce((sum: number, e: any) => sum + e.affected_count, 0) /
+                data.top_events.length
+              ).toFixed(1)
               : '-'}
           </p>
         </div>
@@ -169,13 +185,12 @@ function EventsTab({ data }: { data: any }) {
                   <td className="text-right font-bold">{event.total_impact.toFixed(0)}</td>
                   <td className="text-center">
                     <span
-                      className={`px-2 py-1 rounded text-xs font-bold ${
-                        event.severity === 'CRITICAL'
-                          ? 'bg-red-900 text-red-200'
-                          : event.severity === 'HIGH'
+                      className={`px-2 py-1 rounded text-xs font-bold ${event.severity === 'CRITICAL'
+                        ? 'bg-red-900 text-red-200'
+                        : event.severity === 'HIGH'
                           ? 'bg-yellow-900 text-yellow-200'
                           : 'bg-blue-900 text-blue-200'
-                      }`}
+                        }`}
                     >
                       {event.severity}
                     </span>
@@ -211,9 +226,9 @@ function ClusteringTab({ data }: { data: any }) {
           <p className="text-3xl font-bold text-green-400">
             {data.top_clusters?.length > 0
               ? (
-                  data.top_clusters.reduce((sum: number, c: any) => sum + c.reliability_pct, 0) /
-                  data.top_clusters.length
-                ).toFixed(1)
+                data.top_clusters.reduce((sum: number, c: any) => sum + c.reliability_pct, 0) /
+                data.top_clusters.length
+              ).toFixed(1)
               : '-'}
             %
           </p>
@@ -247,8 +262,8 @@ function ClusteringTab({ data }: { data: any }) {
                         cluster.reliability_pct > 85
                           ? 'text-green-400'
                           : cluster.reliability_pct > 70
-                          ? 'text-yellow-400'
-                          : 'text-red-400'
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
                       }
                     >
                       {cluster.reliability_pct}%
@@ -257,13 +272,12 @@ function ClusteringTab({ data }: { data: any }) {
                   <td className="text-center">{cluster.outage_events}</td>
                   <td className="text-center">
                     <span
-                      className={`px-2 py-1 rounded text-xs font-bold ${
-                        cluster.priority === 'CRITICAL'
-                          ? 'bg-red-900 text-red-200'
-                          : cluster.priority === 'HIGH'
+                      className={`px-2 py-1 rounded text-xs font-bold ${cluster.priority === 'CRITICAL'
+                        ? 'bg-red-900 text-red-200'
+                        : cluster.priority === 'HIGH'
                           ? 'bg-yellow-900 text-yellow-200'
                           : 'bg-blue-900 text-blue-200'
-                      }`}
+                        }`}
                     >
                       {cluster.priority}
                     </span>
@@ -310,15 +324,14 @@ function RiskTab({ data }: { data: any }) {
               title={`Hour ${hour.hour}: Risk ${hour.risk_score}/10 (${hour.historical_outages} outages, ${hour.affected_meters} meters)`}
             >
               <div
-                className={`w-full h-16 rounded flex items-center justify-center font-bold text-sm cursor-pointer transition ${
-                  hour.risk_level === 'CRITICAL'
-                    ? 'bg-red-600 text-red-100'
-                    : hour.risk_level === 'HIGH'
+                className={`w-full h-16 rounded flex items-center justify-center font-bold text-sm cursor-pointer transition ${hour.risk_level === 'CRITICAL'
+                  ? 'bg-red-600 text-red-100'
+                  : hour.risk_level === 'HIGH'
                     ? 'bg-yellow-600 text-yellow-100'
                     : hour.risk_level === 'MEDIUM'
-                    ? 'bg-blue-600 text-blue-100'
-                    : 'bg-green-600 text-green-100'
-                }`}
+                      ? 'bg-blue-600 text-blue-100'
+                      : 'bg-green-600 text-green-100'
+                  }`}
               >
                 {hour.risk_score}
               </div>
@@ -353,15 +366,14 @@ function RiskTab({ data }: { data: any }) {
                   <td className="text-center">{hour.avg_duration}</td>
                   <td className="text-center">
                     <span
-                      className={`px-2 py-1 rounded text-xs font-bold ${
-                        hour.risk_level === 'CRITICAL'
-                          ? 'bg-red-900 text-red-200'
-                          : hour.risk_level === 'HIGH'
+                      className={`px-2 py-1 rounded text-xs font-bold ${hour.risk_level === 'CRITICAL'
+                        ? 'bg-red-900 text-red-200'
+                        : hour.risk_level === 'HIGH'
                           ? 'bg-yellow-900 text-yellow-200'
                           : hour.risk_level === 'MEDIUM'
-                          ? 'bg-blue-900 text-blue-200'
-                          : 'bg-green-900 text-green-200'
-                      }`}
+                            ? 'bg-blue-900 text-blue-200'
+                            : 'bg-green-900 text-green-200'
+                        }`}
                     >
                       {hour.risk_level}
                     </span>
@@ -468,13 +480,12 @@ function PhaseCard({
           <p className="text-sm text-gray-400">{timeline}</p>
         </div>
         <span
-          className={`px-3 py-1 rounded text-xs font-bold ${
-            priority === 'CRITICAL'
-              ? 'bg-red-900 text-red-200'
-              : priority === 'HIGH'
+          className={`px-3 py-1 rounded text-xs font-bold ${priority === 'CRITICAL'
+            ? 'bg-red-900 text-red-200'
+            : priority === 'HIGH'
               ? 'bg-yellow-900 text-yellow-200'
               : 'bg-blue-900 text-blue-200'
-          }`}
+            }`}
         >
           {priority}
         </span>

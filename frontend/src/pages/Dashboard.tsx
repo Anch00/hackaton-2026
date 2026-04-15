@@ -1,30 +1,95 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { analyzeFolder } from '../api/client'
 import AnomalyPieChart from '../components/AnomalyPieChart'
 import FileUpload from '../components/FileUpload'
 import HeatmapChart from '../components/HeatmapChart'
 import KpiCard from '../components/KpiCard'
+import { useAnalysis } from '../context/AnalysisContext'
 import type { AnalysisResult, FolderKey } from '../types'
 
+const FOLDER_OPTIONS: { key: FolderKey; label: string; icon: string; description: string }[] = [
+  { key: 'vsi_podatki', label: 'Vsi podatki', icon: '📁', description: 'Celoten nabor merilnikov' },
+  { key: 'ovrednoteni', label: 'Ovrednoteni', icon: '✓', description: 'Označeni testni podatki' },
+  { key: 'uploads', label: 'Naloženi', icon: '⬆', description: 'Tvoje naložene datoteke' },
+]
+
 export default function Dashboard() {
-  const [folder, setFolder] = useState<FolderKey>('vsi_podatki')
-  const [result, setResult] = useState<AnalysisResult | null>(null)
+  const {
+    currentFolder,
+    setCurrentFolder,
+    getResult,
+    setResult,
+    preloadAllData,
+    clearAllData,
+  } = useAnalysis()
+
+  const [folder, setFolderState] = useState<FolderKey>(currentFolder)
+  const [result, setLocalResult] = useState<AnalysisResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState(0)
+
+  // Sync folder with context
+  useEffect(() => {
+    setFolderState(currentFolder)
+  }, [currentFolder])
+
+  // Load result from context on mount
+  useEffect(() => {
+    const cachedResult = getResult(currentFolder)
+    if (cachedResult) {
+      setLocalResult(cachedResult)
+    }
+  }, [currentFolder, getResult])
+
+  const setFolder = useCallback((newFolder: FolderKey) => {
+    setFolderState(newFolder)
+    setCurrentFolder(newFolder)
+    const cached = getResult(newFolder)
+    setLocalResult(cached)
+    if (!cached) {
+      setError(null)
+      setProgress(0)
+    }
+  }, [setCurrentFolder, getResult])
 
   const runAnalysis = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setProgress(0)
+
+    // Simuliraj progress bar
+    const progressInterval = setInterval(() => {
+      setProgress(prev => {
+        if (prev >= 90) return prev
+        return prev + Math.random() * 15
+      })
+    }, 1000)
+
     try {
       const data = await analyzeFolder(folder)
-      setResult(data)
+      setLocalResult(data)
+      setResult(folder, data)
+      setProgress(100)
+      // Preload all other data for this folder in background
+      preloadAllData(folder)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Napaka pri analizi.'
       setError(msg)
     } finally {
+      clearInterval(progressInterval)
       setLoading(false)
     }
-  }, [folder])
+  }, [folder, setResult, preloadAllData])
+
+  const handleClearAll = useCallback(() => {
+    clearAllData()
+    setLocalResult(null)
+    setError(null)
+    setProgress(0)
+  }, [clearAllData])
+
+  const currentOption = FOLDER_OPTIONS.find(o => o.key === folder)
 
   return (
     <div className="space-y-6">
@@ -34,38 +99,113 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-white">GridSense Dashboard</h1>
           <p className="text-sm text-gray-500">Analiza pametnih merilnikov — Elektro Maribor Hackathon</p>
         </div>
-        <div className="flex items-center gap-3">
-          <select
-            className="bg-gray-800 text-sm text-gray-200 rounded px-3 py-2 border border-gray-700"
-            value={folder}
-            onChange={(e) => setFolder(e.target.value as FolderKey)}
-          >
-            <option value="vsi_podatki">Vsi podatki</option>
-            <option value="ovrednoteni">Ovrednoteni</option>
-            <option value="uploads">Naloženi</option>
-          </select>
-          <button
-            className="btn-primary"
-            onClick={runAnalysis}
-            disabled={loading}
-          >
-            {loading ? (
-              <span className="flex items-center gap-2">
-                <span className="animate-spin">⏳</span> Analiziram...
-              </span>
-            ) : (
-              '⚡ Zaženi analizo'
-            )}
-          </button>
+      </div>
+
+      {/* Data Source Selection */}
+      <div className="card">
+        <h2 className="text-sm font-medium text-gray-400 mb-4 uppercase tracking-wide">Izberi vir podatkov</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {FOLDER_OPTIONS.map((option) => (
+            <button
+              key={option.key}
+              onClick={() => setFolder(option.key)}
+              className={`relative p-4 rounded-xl border-2 text-left transition-all duration-200 ${folder === option.key
+                ? 'border-blue-500 bg-blue-900/20 shadow-lg shadow-blue-900/20'
+                : 'border-gray-700 bg-gray-800/50 hover:border-gray-600 hover:bg-gray-800'
+                }`}
+            >
+              <div className="flex items-start gap-3">
+                <span className="text-2xl">{option.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className={`font-semibold ${folder === option.key ? 'text-blue-400' : 'text-gray-200'}`}>
+                    {option.label}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">{option.description}</div>
+                </div>
+                {folder === option.key && (
+                  <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-500"></div>
+                )}
+              </div>
+            </button>
+          ))}
         </div>
       </div>
+
+      {/* Upload Section - only for uploads */}
+      {folder === 'uploads' && (
+        <FileUpload onUploaded={() => setFolder('uploads')} />
+      )}
+
+      {/* Analysis Button - only for vsi_podatki and ovrednoteni */}
+      {(folder === 'vsi_podatki' || folder === 'ovrednoteni') && !result && (
+        <div className="card">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-gray-200">
+                {currentOption?.icon} {currentOption?.label}
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Analiza {folder === 'vsi_podatki' ? 'vseh 200' : 'označenih'} merilnikov (~15-30 sekund)
+              </p>
+            </div>
+            <button
+              className="btn-primary min-w-[160px]"
+              onClick={runAnalysis}
+              disabled={loading}
+            >
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="animate-spin">⏳</span>
+                  <span>Analiziram...</span>
+                </span>
+              ) : (
+                <span className="flex items-center justify-center gap-2">
+                  <span>⚡</span>
+                  <span>Začni analizo</span>
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Loading Bar */}
+          {loading && (
+            <div className="mt-4">
+              <div className="flex justify-between text-xs text-gray-400 mb-1">
+                <span>Obdelava merilnikov...</span>
+                <span>{Math.round(progress)}%</span>
+              </div>
+              <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-500 ease-out"
+                  style={{ width: `${Math.min(progress, 100)}%` }}
+                ></div>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Zaznavam anomalije, računam SAIDI/SAIFI, iščem sistemske izpade...
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="card border-red-800 bg-red-950/40 text-red-400 text-sm">{error}</div>
       )}
 
-      {/* Upload section */}
-      <FileUpload onUploaded={() => setFolder('uploads')} />
+      {/* Results Header */}
+      {result && (
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-200">
+            {currentOption?.icon} Rezultati analize: {currentOption?.label}
+          </h2>
+          <button
+            onClick={handleClearAll}
+            className="btn-secondary text-sm"
+          >
+            🔄 Nova analiza
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       {result && (
@@ -160,20 +300,21 @@ export default function Dashboard() {
             </a>
 
             <a href={`/api/export/submission?folder=${folder}`}
-                className="btn-secondary text-sm"
-                download
-              >
-                ⬇ Izvozi submission CSV
-              </a>
+              className="btn-secondary text-sm"
+              download
+            >
+              ⬇ Izvozi submission CSV
+            </a>
           </div>
         </>
       )}
 
-      {!result && !loading && (
-        <div className="card text-center py-16 text-gray-600">
-          <div className="text-5xl mb-4">⚡</div>
-          <p className="text-lg">Klikni "Zaženi analizo" za začetek.</p>
-          <p className="text-sm mt-2">Analiza 200 merilnikov traja ~15–30 sekund.</p>
+      {/* Empty state for uploads without analysis yet */}
+      {folder === 'uploads' && !result && (
+        <div className="card text-center py-12 text-gray-600">
+          <div className="text-4xl mb-3">⬆</div>
+          <p className="text-base">Naloži CSV ali ZIP datoteke za analizo</p>
+          <p className="text-sm mt-2 text-gray-500">Po uspešnem nalaganju se bo prikazal gumb za analizo</p>
         </div>
       )}
     </div>

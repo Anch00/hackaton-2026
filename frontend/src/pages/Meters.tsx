@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getMeters } from '../api/client'
 import AnomalyBadge from '../components/AnomalyBadge'
+import { useAnalysis } from '../context/AnalysisContext'
 import type { FolderKey, MeterStatus, MeterSummary } from '../types'
 import { ANOMALY_LABELS, STATUS_COLORS, STATUS_LABELS } from '../types'
 
 export default function Meters() {
   const navigate = useNavigate()
-  const [folder, setFolder] = useState<FolderKey>('vsi_podatki')
+  const { currentFolder, setCurrentFolder, getPreloadedMeters } = useAnalysis()
+
+  const [folder, setFolderState] = useState<FolderKey>(currentFolder)
   const [meters, setMeters] = useState<MeterSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -15,7 +18,24 @@ export default function Meters() {
   const [filterType, setFilterType] = useState('ALL')
   const [search, setSearch] = useState('')
 
+  // Sync folder with context
+  useEffect(() => {
+    setFolderState(currentFolder)
+  }, [currentFolder])
+
+  const setFolder = useCallback((newFolder: FolderKey) => {
+    setFolderState(newFolder)
+    setCurrentFolder(newFolder)
+  }, [setCurrentFolder])
+
   const load = useCallback(async () => {
+    // First check if we have preloaded data
+    const preloaded = getPreloadedMeters(folder)
+    if (preloaded) {
+      setMeters(preloaded)
+      return
+    }
+
     setLoading(true)
     setError(null)
     try {
@@ -26,7 +46,7 @@ export default function Meters() {
     } finally {
       setLoading(false)
     }
-  }, [folder])
+  }, [folder, getPreloadedMeters])
 
   useEffect(() => { load() }, [load])
 

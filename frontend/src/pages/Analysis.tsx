@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   CartesianGrid, Legend,
   Line,
@@ -8,6 +8,7 @@ import {
   XAxis, YAxis,
 } from 'recharts'
 import { getMeterDetail, getMeters } from '../api/client'
+import { useAnalysis } from '../context/AnalysisContext'
 import type { FolderKey, MeterDetail, MeterSummary } from '../types'
 import { fmtTimestampShort } from '../utils/format'
 
@@ -16,19 +17,40 @@ const PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4
 const fmtTs = fmtTimestampShort
 
 export default function Analysis() {
-  const [folder, setFolder] = useState<FolderKey>('vsi_podatki')
+  const { currentFolder, setCurrentFolder, getPreloadedMeters } = useAnalysis()
+
+  const [folder, setFolderState] = useState<FolderKey>(currentFolder)
   const [meters, setMeters] = useState<MeterSummary[]>([])
   const [selected, setSelected] = useState<number[]>([])
   const [details, setDetails] = useState<Record<number, MeterDetail>>({})
   const [loadingMeters, setLoadingMeters] = useState(false)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
+  // Sync folder with context
   useEffect(() => {
+    setFolderState(currentFolder)
+  }, [currentFolder])
+
+  const setFolder = useCallback((newFolder: FolderKey) => {
+    setFolderState(newFolder)
+    setCurrentFolder(newFolder)
+    setSelected([])
+    setDetails({})
+  }, [setCurrentFolder])
+
+  useEffect(() => {
+    // First check if we have preloaded data
+    const preloaded = getPreloadedMeters(folder)
+    if (preloaded) {
+      setMeters(preloaded)
+      return
+    }
+
     setLoadingMeters(true)
     getMeters(folder)
       .then(setMeters)
       .finally(() => setLoadingMeters(false))
-  }, [folder])
+  }, [folder, getPreloadedMeters])
 
   const toggleMeter = async (meterId: number) => {
     if (selected.includes(meterId)) {
@@ -73,7 +95,7 @@ export default function Analysis() {
         <select
           className="bg-gray-800 text-sm text-gray-200 rounded px-3 py-2 border border-gray-700"
           value={folder}
-          onChange={(e) => { setFolder(e.target.value as FolderKey); setSelected([]); setDetails({}) }}
+          onChange={(e) => setFolder(e.target.value as FolderKey)}
         >
           <option value="vsi_podatki">Vsi podatki</option>
           <option value="ovrednoteni">Ovrednoteni</option>
