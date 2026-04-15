@@ -158,6 +158,13 @@ export default function Dashboard() {
             >
               ⬇ Izvozi JSON
             </a>
+
+            <a href={`/api/export/submission?folder=${folder}`}
+                className="btn-secondary text-sm"
+                download
+              >
+                ⬇ Izvozi submission CSV
+              </a>
           </div>
         </>
       )}

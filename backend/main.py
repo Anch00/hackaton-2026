@@ -386,6 +386,48 @@ def export_json(folder: str = Query(default="vsi_podatki")):
     )
 
 
+@app.get("/api/export/submission")
+def export_submission(folder: str = Query(default="vsi_podatki")):
+    """
+    Submission CSV (no header):
+    meter_id, timestamp, anomaly (0 or 1)
+    Sorted by meter_id asc, then timestamp asc.
+    """
+    folder_path = _resolve_folder(folder)
+    meters_raw = load_all_meters(str(folder_path))
+    if not meters_raw:
+        raise HTTPException(404, "V mapi ni CSV datotek.")
+
+    rows = []
+    for meter_id, df in meters_raw.items():
+        has_labels = df["anomaly"].notna().any()
+        if has_labels:
+            continue
+
+        df = detect_anomalies(df)
+        df["anomaly_pred"] = df["anomaly_pred"].fillna(False).astype(int)
+
+        for _, row in df.iterrows():
+            rows.append((int(meter_id), row["timestamp"], int(row["anomaly_pred"])))
+
+    if not rows:
+        raise HTTPException(404, "Ni neoznačenih podatkov za izvoz.")
+
+    rows.sort(key=lambda r: (r[0], r[1]))
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    for meter_id, timestamp, anomaly in rows:
+        writer.writerow([meter_id, timestamp.strftime("%Y-%m-%d %H:%M:%S"), anomaly])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=submission.csv"},
+    )
+
+
 # ── ADVANCED ANALYTICS (Phase 3 & 4 Integration) ────────────────────────────
 
 @app.get("/api/analytics/events")
