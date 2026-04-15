@@ -27,52 +27,72 @@ class EventReconstructor:
     
     @staticmethod
     def detect_outages(df: pd.DataFrame) -> List[Dict]:
-        """Detect outage blocks with root cause classification"""
+        """
+        Detect anomaly blocks using the full 4-method detection pipeline
+        (z-score, rolling variance, zero-flag, Isolation Forest) and the
+        classifier that distinguishes DALJSI_IZPAD, ZAMRZNJEN_SIGNAL, DRIFT, etc.
+
+        Falls back to zero-only scanning if the detector import fails so the
+        rest of the system keeps working in minimal environments.
+        """
         if df.empty:
             return []
-        
-        values = df["value"].values
-        outages = []
-        
-        in_block = False
-        block_start = None
-        
-        for i, val in enumerate(values):
-            if val == 0:
-                if not in_block:
-                    block_start = i
-                    in_block = True
-            else:
-                if in_block:
-                    duration = i - block_start
-                    # Classify root cause by duration
-                    root_cause_type, root_cause_reason = RootCauseClassifier.classify_by_duration(duration)
-                    
-                    outages.append({
-                        'start_idx': block_start,
-                        'end_idx': i - 1,
-                        'start_ts': df.iloc[block_start]['timestamp'],
-                        'end_ts': df.iloc[i - 1]['timestamp'],
-                        'duration_hours': duration,
-                        'root_cause': root_cause_type,
-                        'cause_reason': root_cause_reason
-                    })
-                    in_block = False
-        
-        if in_block:
-            duration = len(values) - block_start
-            root_cause_type, root_cause_reason = RootCauseClassifier.classify_by_duration(duration)
-            outages.append({
-                'start_idx': block_start,
-                'end_idx': len(values) - 1,
-                'start_ts': df.iloc[block_start]['timestamp'],
-                'end_ts': df.iloc[-1]['timestamp'],
-                'duration_hours': duration,
-                'root_cause': root_cause_type,
-                'cause_reason': root_cause_reason
-            })
-        
-        return outages
+
+        try:
+            from core.detector import detect_anomalies
+            from core.classifier import extract_blocks
+
+            df_detected = detect_anomalies(df)
+            blocks = extract_blocks(df_detected)
+
+            outages = []
+            for block in blocks:
+                outages.append({
+                    'start_ts': block.start,
+                    'end_ts': block.end,
+                    'duration_hours': block.duration_h,
+                    'root_cause': block.anomaly_type,
+                    'cause_reason': f"{block.anomaly_type} | severity={block.severity}",
+                })
+            return outages
+
+        except Exception:
+            # Fallback: zero-only scan with duration-based classification
+            values = df["value"].values
+            outages = []
+            in_block = False
+            block_start = None
+
+            for i, val in enumerate(values):
+                if val == 0:
+                    if not in_block:
+                        block_start = i
+                        in_block = True
+                else:
+                    if in_block:
+                        duration = i - block_start
+                        root_cause_type, root_cause_reason = RootCauseClassifier.classify_by_duration(duration)
+                        outages.append({
+                            'start_ts': df.iloc[block_start]['timestamp'],
+                            'end_ts': df.iloc[i - 1]['timestamp'],
+                            'duration_hours': duration,
+                            'root_cause': root_cause_type,
+                            'cause_reason': root_cause_reason,
+                        })
+                        in_block = False
+
+            if in_block:
+                duration = len(values) - block_start
+                root_cause_type, root_cause_reason = RootCauseClassifier.classify_by_duration(duration)
+                outages.append({
+                    'start_ts': df.iloc[block_start]['timestamp'],
+                    'end_ts': df.iloc[-1]['timestamp'],
+                    'duration_hours': duration,
+                    'root_cause': root_cause_type,
+                    'cause_reason': root_cause_reason,
+                })
+
+            return outages
     
     @staticmethod
     def reconstruct_events(meters_dict: Dict[int, pd.DataFrame]) -> List[Dict]:
@@ -114,7 +134,8 @@ class EventReconstructor:
                 'root_cause': most_common_cause
             })
         
-        return sorted(events, key=lambda x: x['total_impact'], reverse=True)
+        sorted_events = sorted(events, key=lambda x: x['total_impact'], reverse=True)
+        return sorted_events
     
     @staticmethod
     def _classify_severity(meter_count: int, duration_hours: float) -> str:
@@ -295,42 +316,62 @@ class InfrastructureOptimizer:
             health = GeographicAnalyzer.calculate_cluster_health(meter_ids, meters_dict)
             cluster_health[cluster_id] = health
         
-        # Sort by priority
+        # Sort by priority (CRITICAL first, then by lowest reliability within each tier)
+        priority_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2}
         sorted_clusters = sorted(
             cluster_health.items(),
-            key=lambda x: (x[1]['priority'] == 'CRITICAL', x[1]['reliability_pct']),
-            reverse=True
+            key=lambda x: (priority_order.get(x[1]['priority'], 3), x[1]['reliability_pct']),
         )
-        
+
         # Group into phases
         phase1 = sorted_clusters[0:2]   # Top 2
         phase2 = sorted_clusters[2:4]   # Next 2
         phase3 = sorted_clusters[4:8]   # Next 4
-        
+
+        # --- Compute SAIDI figures from actual data, not hardcoded constants ---
+        total_meters = max(sum(h[1]['meter_count'] for h in sorted_clusters), 1)
         total_zero_hours = sum(h[1]['total_zero_hours'] for h in sorted_clusters)
-        
+
+        def _phase_zero(phase_clusters):
+            return sum(c[1]['total_zero_hours'] for c in phase_clusters)
+
+        p1_zero = _phase_zero(phase1)
+        p2_zero = _phase_zero(phase2)
+        p3_zero = _phase_zero(phase3)
+
+        # Cumulative SAIDI hours saved after each phase (zero_hours / total_meters)
+        saidi_after_p1 = round(p1_zero / total_meters, 1)
+        saidi_after_p2 = round((p1_zero + p2_zero) / total_meters, 1)
+        saidi_after_p3 = round((p1_zero + p2_zero + p3_zero) / total_meters, 1)
+
+        # Improvement % relative to total zero hours across all clusters
+        def _improvement_pct(zero_h):
+            return round(zero_h / total_zero_hours * 100, 1) if total_zero_hours > 0 else 0
+
+        remaining_after_p3 = max(0, total_zero_hours - p1_zero - p2_zero - p3_zero)
+
         return {
             'phase_1': {
                 'clusters': [c[0] for c in phase1],
                 'meters_count': sum(c[1]['meter_count'] for c in phase1),
-                'expected_improvement_pct': 30,
-                'saidi_reduction': round(262 * 0.3, 1),  # Base from Phase 2 findings
+                'expected_improvement_pct': _improvement_pct(p1_zero),
+                'saidi_reduction': saidi_after_p1,
                 'timeline': 'Months 1-3',
                 'priority': 'CRITICAL'
             },
             'phase_2': {
                 'clusters': [c[0] for c in phase2],
                 'meters_count': sum(c[1]['meter_count'] for c in phase2),
-                'expected_improvement_pct': 20,
-                'saidi_reduction': round(262 * 0.5, 1),  # Cumulative
+                'expected_improvement_pct': _improvement_pct(p1_zero + p2_zero),
+                'saidi_reduction': saidi_after_p2,
                 'timeline': 'Months 4-6',
                 'priority': 'HIGH'
             },
             'phase_3': {
                 'clusters': [c[0] for c in phase3],
                 'meters_count': sum(c[1]['meter_count'] for c in phase3),
-                'expected_improvement_pct': 15,
-                'saidi_reduction': round(262 * 0.81, 1),  # Cumulative
+                'expected_improvement_pct': _improvement_pct(p1_zero + p2_zero + p3_zero),
+                'saidi_reduction': saidi_after_p3,
                 'timeline': 'Months 7-12',
                 'priority': 'MEDIUM'
             },
@@ -338,7 +379,7 @@ class InfrastructureOptimizer:
                 'total_clusters': len(sorted_clusters),
                 'critical_clusters': sum(1 for _, h in sorted_clusters if h['priority'] == 'CRITICAL'),
                 'total_zero_hours_current': total_zero_hours,
-                'estimated_zero_hours_after_phase3': round(total_zero_hours * 0.19, 0),  # 81% reduction
+                'estimated_zero_hours_after_phase3': round(remaining_after_p3, 0),
                 'network_reliability_score': 'CRITICAL' if total_zero_hours > 10000 else 'POOR'
             }
         }
