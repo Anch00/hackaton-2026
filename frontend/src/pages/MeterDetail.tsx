@@ -66,8 +66,8 @@ export default function MeterDetail() {
         {[
           { label: 'Skupaj meritev', value: detail.total_readings },
           { label: 'Anomalij', value: `${detail.anomaly_count} (${anomalyPct}%)` },
-          { label: 'Povprečna vrednost', value: `${detail.value_avg.toFixed(2)} W` },
-          { label: 'Std. odklon', value: `${detail.value_std.toFixed(2)} W` },
+          { label: 'Povprečna vrednost', value: `${detail.value_avg.toFixed(2)}` },
+          { label: 'Std. odklon', value: `${detail.value_std.toFixed(2)}` },
         ].map((s) => (
           <div key={s.label} className="card">
             <div className="text-xs text-gray-500">{s.label}</div>
@@ -118,8 +118,8 @@ export default function MeterDetail() {
                     <td className="px-3 py-2"><AnomalyBadge type={b.type} /></td>
                     <td className="px-3 py-2">
                       <span className={`badge ${b.severity === 'HIGH' ? 'bg-red-900 text-red-300' :
-                          b.severity === 'MEDIUM' ? 'bg-yellow-900 text-yellow-300' :
-                            'bg-blue-900 text-blue-300'
+                        b.severity === 'MEDIUM' ? 'bg-yellow-900 text-yellow-300' :
+                          'bg-blue-900 text-blue-300'
                         }`}>{b.severity}</span>
                     </td>
                     <td className="px-3 py-2 text-gray-400">{b.avg_value.toFixed(2)}</td>
